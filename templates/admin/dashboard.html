@@ -49,15 +49,15 @@
             </div>
         </a>
 
-        <!-- Card 3: Total Orders -->
-        <a href="{{ url_for('admin.orders') }}" class="bento-card">
+        <!-- Card 3: Total Categories -->
+        <a href="{{ url_for('admin.categories') }}" class="bento-card">
             <div class="card-header-row">
-                <div class="icon-box icon-amber"><i class="bi bi-cart-fill"></i></div>
-                <span class="trend-pill trend-neutral">All Time</span>
+                <div class="icon-box icon-amber"><i class="bi bi-grid-fill"></i></div>
+                <span class="trend-pill trend-neutral">Active</span>
             </div>
             <div>
-                <div class="stat-value">{{ stats.total_orders if stats else 0 }}</div>
-                <div class="stat-label">Total Orders</div>
+                <div class="stat-value">{{ stats.total_categories if stats else 0 }}</div>
+                <div class="stat-label">Total Categories</div>
             </div>
         </a>
 
@@ -107,15 +107,6 @@
                     </a>
                     <a href="{{ url_for('admin.categories') }}" class="btn-action" style="justify-content: center;">
                         <i class="bi bi-grid"></i>Categories
-                    </a>
-                    <a href="{{ url_for('admin.orders') }}" class="btn-action" style="justify-content: center;">
-                        <i class="bi bi-cart"></i>View Orders
-                    </a>
-                    <a href="{{ url_for('admin.bookings') }}" class="btn-action" style="justify-content: center;">
-                        <i class="bi bi-calendar-check"></i>Bookings
-                    </a>
-                    <a href="{{ url_for('admin.availability') }}" class="btn-action" style="justify-content: center;">
-                        <i class="bi bi-calendar-range"></i>Availability
                     </a>
                     <a href="{{ url_for('admin.pending_services') }}" class="btn-action"
                         style="justify-content: center;{% if pending_services_count > 0 %} color: #D97706; font-weight: 700;{% endif %}">

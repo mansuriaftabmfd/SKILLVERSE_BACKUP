@@ -295,6 +295,54 @@ def privacy():
     return render_template('legal/privacy.html')
 
 
+@main_bp.route('/verify/certificate/<int:order_id>')
+def verify_certificate(order_id):
+    """
+    Certificate verification page
+    
+    Verifies if a certificate is authentic by checking:
+    - Order exists and is completed
+    - Certificate name has been generated
+    - All certificate details match
+    
+    Args:
+        order_id: Order ID from certificate
+        
+    Returns:
+        Rendered verification page with certificate details
+    """
+    order = Order.query.get(order_id)
+    
+    verification_data = {
+        'is_valid': False,
+        'order_id': order_id,
+        'message': '',
+        'details': {}
+    }
+    
+    if not order:
+        verification_data['message'] = 'Certificate not found. Invalid Order ID.'
+    elif order.status != 'completed':
+        verification_data['message'] = 'This order is not completed yet. Certificate not issued.'
+    elif not order.certificate_name:
+        verification_data['message'] = 'Certificate has not been generated for this order.'
+    else:
+        # Certificate is valid
+        verification_data['is_valid'] = True
+        verification_data['message'] = 'Certificate is authentic and verified!'
+        verification_data['details'] = {
+            'certificate_id': f'CERT-{order_id:06d}',
+            'recipient_name': order.certificate_name,
+            'service_title': order.service.title,
+            'instructor_name': order.service.provider.full_name or order.service.provider.username,
+            'completion_date': order.completed_at.strftime('%B %d, %Y') if order.completed_at else 'N/A',
+            'issued_date': order.updated_at.strftime('%B %d, %Y'),
+            'order_reference': f'#{order_id}'
+        }
+    
+    return render_template('verify_certificate.html', data=verification_data)
+
+
 # ============================================================================
 # AUTHENTICATION ROUTES
 # ============================================================================
@@ -898,10 +946,6 @@ def place_order(service_id):
     """
     Place order for service
     
-    WALLET VALIDATION (Unit-8: Exception Handling)
-    - Checks if user has sufficient wallet balance before allowing order
-    - Deducts amount from wallet upon successful order placement
-    
     Args:
         service_id: Service ID
         
@@ -925,15 +969,12 @@ def place_order(service_id):
     # Calculate order price based on budget tier
     base_price = service.price
     if budget_tier == 'Basic':
-        order_price = base_price * 0.8  # 20% discount for basic
+        order_price = base_price * 0.8
     elif budget_tier == 'Premium':
-        order_price = base_price * 1.5  # 50% extra for premium
+        order_price = base_price * 1.5
     else:
-        order_price = base_price  # Standard price
+        order_price = base_price
     
-    # =====================================================================
-    # WALLET BALANCE VALIDATION (Unit-8: Exception Handling, Unit-9: OOP)
-    # =====================================================================
     gateway = PaymentGateway()
     wallet_mgr = WalletManager(payment_gateway=gateway)
     
@@ -942,98 +983,33 @@ def place_order(service_id):
     
     # Check if user has sufficient balance
     if current_balance < order_price:
-        # Insufficient balance - redirect to wallet page
         shortfall = order_price - current_balance
         flash(f'Insufficient wallet balance! You need ₹{int(order_price)} but have only ₹{int(current_balance)}. Please add ₹{int(shortfall)} to your wallet.', 'danger')
         return redirect(url_for('user.wallet'))
     
-    # Create order using OrderManager
+    # Create order
     order = order_manager.create_order(service_id, current_user.id, requirements, '', budget_tier, None)
     
     if order:
-        # =====================================================================
-        # DEDUCT AMOUNT FROM WALLET (Unit-6: File Handling, Unit-9: OOP)
-        # =====================================================================
-        buyer_payment_success = False
-        seller_credit_success = False
-        buyer_txn_id = None
-        
         try:
-            # Capture transaction result to get ID
-            buyer_txn = wallet_mgr.deduct_money(
+            # Deduct from buyer's wallet
+            wallet_mgr.deduct_money(
                 user_id=current_user.id,
                 amount=order.total_price,
                 description=f'Service Purchase: {service.title} (Order #{order.id})',
                 username=current_user.username
             )
-            buyer_txn_id = buyer_txn.get('id')
-            buyer_payment_success = True
-            print(f"[DEBUG] Successfully deducted ₹{order.total_price} from buyer (user_id: {current_user.id}). Txn ID: {buyer_txn_id}")
             
         except InsufficientBalanceException:
-            # This shouldn't happen as we checked above, but just in case
             flash('Payment failed due to insufficient balance.', 'danger')
-            # Cancel the order
             order.status = 'cancelled'
             db.session.commit()
             return redirect(url_for('service.detail', service_id=service_id))
         except Exception as e:
-            print(f"[ERROR] Buyer deduction failed: {str(e)}")
             flash(f'Payment processing error: {str(e)}', 'danger')
             order.status = 'cancelled'
             db.session.commit()
             return redirect(url_for('service.detail', service_id=service_id))
-        
-        # =====================================================================
-        # CREDIT AMOUNT TO SELLER'S WALLET (Unit-6: File Handling, Unit-9: OOP)
-        # =====================================================================
-        # Platform fee: 10% (SkillVerse keeps 10%, seller gets 90%)
-        platform_fee_percent = 0.10
-        seller_amount = order.total_price * (1 - platform_fee_percent)
-        
-        # Get seller username for transaction record
-        seller = User.query.get(order.seller_id)
-        seller_username = seller.username if seller else f'User #{order.seller_id}'
-        
-        try:
-            print(f"[DEBUG] Attempting to credit seller (user_id: {order.seller_id}) with ₹{seller_amount}")
-            wallet_mgr.credit_seller(
-                user_id=order.seller_id,
-                amount=seller_amount,
-                description=f'Payment Received: {service.title} (Order #{order.id}) - After 10% platform fee',
-                username=seller_username,
-                transaction_id=buyer_txn_id
-            )
-            seller_credit_success = True
-            print(f"[DEBUG] Successfully credited ₹{seller_amount} to seller (user_id: {order.seller_id})")
-        except Exception as e:
-            # Log the error but don't cancel the order - the buyer already paid
-            # Admin will need to manually credit the seller
-            print(f"[ERROR] Failed to credit seller: {str(e)}")
-            # Note: In production, you'd want to queue this for retry or alert admin
-        
-        # =====================================================================
-        # CREDIT 10% PLATFORM FEE TO ADMIN WALLET (Unit-9: OOP, DBMS)
-        # =====================================================================
-        platform_fee_amount = order.total_price * platform_fee_percent  # 10% of total price
-        
-        try:
-            # Find admin user to credit platform fee
-            admin_user = User.query.filter_by(user_type='admin').first()
-            if admin_user:
-                admin_username = admin_user.username
-                print(f"[DEBUG] Crediting ₹{platform_fee_amount} platform fee to admin (user_id: {admin_user.id})")
-                wallet_mgr.credit_seller(
-                    user_id=admin_user.id,
-                    amount=platform_fee_amount,
-                    description=f'Platform Fee (10%): {service.title} (Order #{order.id}) - From {current_user.username}',
-                    username=admin_username
-                )
-                print(f"[DEBUG] Successfully credited ₹{platform_fee_amount} platform fee to admin (user_id: {admin_user.id})")
-            else:
-                print("[WARNING] No admin user found to credit platform fee")
-        except Exception as e:
-            print(f"[ERROR] Failed to credit platform fee to admin: {str(e)}")
         
         # Create notification for the provider
         notification_manager.create_notification(
@@ -1043,7 +1019,7 @@ def place_order(service_id):
             link=url_for('user.order_detail', order_id=order.id)
         )
         
-        # Send emails to both customer and provider
+        # Send emails
         from email_utils import send_order_placed_emails
         send_order_placed_emails(order)
         
@@ -1345,7 +1321,7 @@ def order_detail(order_id):
 @user_bp.route('/order/<int:order_id>/action/<action>', methods=['POST'])
 @login_required
 def order_action(order_id, action):
-    """Handle order actions (accept/complete)"""
+    """Handle order actions (accept/reject/complete)"""
     order = Order.query.get_or_404(order_id)
     
     if current_user.id != order.seller_id:
@@ -1361,12 +1337,38 @@ def order_action(order_id, action):
             return redirect(url_for('user.order_detail', order_id=order_id))
 
         if order_manager.accept_order(order_id):
-            flash('Order accepted! You can now chat with the client.', 'success')
-            notification_manager.create_notification(order.buyer_id, f"Order #{order.id} Accepted", f"Your order for {order.service.title} has been accepted.", url_for('user.order_detail', order_id=order.id))
+            flash(f'Order accepted! ₹{order.total_price} has been added to your wallet.', 'success')
+            notification_manager.create_notification(
+                order.buyer_id, 
+                f"Order #{order.id} Accepted", 
+                f"Your order for {order.service.title} has been accepted and work will begin soon.", 
+                url_for('user.order_detail', order_id=order.id)
+            )
             
             # Send acceptance emails
             from email_utils import send_order_accepted_emails
             send_order_accepted_emails(order)
+    
+    elif action == 'reject':
+        # Get rejection reason from form
+        rejection_reason = request.form.get('rejection_reason', 'Seller unavailable')
+        
+        if order_manager.reject_order(order_id, rejection_reason):
+            flash(f'Order rejected. Buyer has been refunded ₹{order.total_price}.', 'info')
+            
+            # Notify buyer about rejection with refund confirmation
+            notification_manager.create_notification(
+                order.buyer_id, 
+                f"Order #{order.id} Cancelled - Refund Processed", 
+                f"Your order was cancelled. Reason: {rejection_reason}. ₹{order.total_price} has been refunded to your wallet.",
+                url_for('user.wallet')
+            )
+            
+            # Send rejection email with refund confirmation
+            from email_utils import send_order_rejection_email
+            send_order_rejection_email(order, rejection_reason)
+        else:
+            flash('Failed to reject order.', 'danger')
             
     elif action == 'complete':
         if order_manager.complete_order(order_id):
@@ -1395,6 +1397,67 @@ def send_message(order_id):
             notification_manager.create_notification(receiver_id, "New Message", f"New message from {current_user.username}", url_for('user.order_detail', order_id=order_id))
             
     return redirect(url_for('user.order_detail', order_id=order_id))
+
+
+@user_bp.route('/order/<int:order_id>/certificate', methods=['GET', 'POST'])
+@login_required
+def generate_certificate(order_id):
+    """Generate and download completion certificate"""
+    from flask import send_file, make_response
+    from certificate_generator import certificate_generator
+    
+    order = Order.query.get_or_404(order_id)
+    
+    # Only buyer can generate certificate
+    if current_user.id != order.buyer_id:
+        flash('Unauthorized access', 'danger')
+        return redirect(url_for('user.order_detail', order_id=order_id))
+    
+    # Only for completed orders
+    if order.status != 'completed':
+        flash('Certificate is only available for completed orders', 'warning')
+        return redirect(url_for('user.order_detail', order_id=order_id))
+    
+    # Check if certificate name already exists (one-time entry)
+    if request.method == 'POST':
+        # Only save name if not already set
+        if not order.certificate_name:
+            buyer_name = request.form.get('buyer_name', '').strip()
+            if not buyer_name:
+                flash('Please enter your name', 'warning')
+                return redirect(url_for('user.order_detail', order_id=order_id))
+            
+            # Save the name permanently (one-time only)
+            order.certificate_name = buyer_name
+            db.session.commit()
+        
+        # Use the saved name
+        buyer_name = order.certificate_name
+    else:
+        # GET request - use saved name or default
+        buyer_name = order.certificate_name or (current_user.full_name or current_user.username)
+    
+    # Generate certificate
+    completion_date = order.completed_at.strftime('%B %d, %Y') if order.completed_at else datetime.now().strftime('%B %d, %Y')
+    
+    # Get instructor/provider name
+    instructor_name = order.service.provider.full_name or order.service.provider.username
+    
+    cert_image = certificate_generator.generate_certificate(
+        buyer_name=buyer_name,
+        service_title=order.service.title,
+        completion_date=completion_date,
+        order_id=order.id,
+        instructor_name=instructor_name
+    )
+    
+    # Send as downloadable file
+    return send_file(
+        cert_image,
+        mimetype='image/png',
+        as_attachment=True,
+        download_name=f'SkillVerse_Certificate_{order.id}.png'
+    )
 
 
 @user_bp.route('/profile/<username>')
@@ -1527,6 +1590,7 @@ def delete_portfolio(project_id):
 
 
 @user_bp.route('/orders')
+@user_bp.route('/orders')
 @login_required
 def orders():
     """
@@ -1535,6 +1599,11 @@ def orders():
     Returns:
         Rendered template
     """
+    # Admin cannot access orders - they don't buy/sell services
+    if current_user.is_admin():
+        flash('Admin accounts cannot access order features.', 'warning')
+        return redirect(url_for('admin.dashboard'))
+    
     # Get orders as buyer and seller
     orders_as_buyer = order_manager.get_user_orders(current_user.id, as_buyer=True)
     orders_as_seller = order_manager.get_user_orders(current_user.id, as_buyer=False)
@@ -1562,6 +1631,11 @@ def wallet():
     Returns:
         Rendered template
     """
+    # Admin cannot access wallet - they don't buy/sell services
+    if current_user.is_admin():
+        flash('Admin accounts cannot access wallet features.', 'warning')
+        return redirect(url_for('admin.dashboard'))
+    
     # Import payment system classes
     from payment_system import WalletManager, PaymentGateway
     
@@ -1712,6 +1786,11 @@ def transactions():
     Returns:
         Rendered template
     """
+    # Admin cannot access transactions - they don't buy/sell services
+    if current_user.is_admin():
+        flash('Admin accounts cannot access transaction features.', 'warning')
+        return redirect(url_for('admin.dashboard'))
+    
     from payment_system import PaymentGateway
     
     gateway = PaymentGateway()
@@ -1806,7 +1885,7 @@ def dashboard():
     total_users = User.query.count()
     total_services = Service.query.filter_by(is_active=True, is_approved=True).count()
     pending_services_count = service_manager.get_pending_count()
-    total_orders = Order.query.count()
+    total_categories = Category.query.count()
     total_reviews = Review.query.count()
     
     # Get recent users
@@ -1893,7 +1972,7 @@ def dashboard():
     stats = {
         'total_users': total_users,
         'total_services': total_services,
-        'total_orders': total_orders,
+        'total_categories': total_categories,
         'total_reviews': total_reviews
     }
     
@@ -2025,35 +2104,38 @@ def categories():
     return render_template('admin/categories.html', categories=categories)
 
 
-@admin_bp.route('/orders')
-@admin_required
-def orders():
-    """
-    Manage orders
-    
-    Returns:
-        Rendered template
-    """
-    orders = Order.query.order_by(Order.created_at.desc()).all()
-    return render_template('admin/orders.html', orders=orders)
+# REMOVED: Admin Orders Management - Not needed for service approval workflow
+# @admin_bp.route('/orders')
+# @admin_required
+# def orders():
+#     """
+#     Manage orders
+#     
+#     Returns:
+#         Rendered template
+#     """
+#     orders = Order.query.order_by(Order.created_at.desc()).all()
+#     return render_template('admin/orders.html', orders=orders)
 
 
-@admin_bp.route('/bookings')
-@login_required
-@admin_required
-def bookings():
-    """Admin page to view all bookings"""
-    bookings = Booking.query.order_by(Booking.created_at.desc()).all()
-    return render_template('admin/bookings.html', bookings=bookings)
+# REMOVED: Admin Bookings Management - Not needed for service approval workflow
+# @admin_bp.route('/bookings')
+# @login_required
+# @admin_required
+# def bookings():
+#     """Admin page to view all bookings"""
+#     bookings = Booking.query.order_by(Booking.created_at.desc()).all()
+#     return render_template('admin/bookings.html', bookings=bookings)
 
 
-@admin_bp.route('/availability')
-@login_required
-@admin_required
-def availability():
-    """Admin page to view all availability slots"""
-    slots = AvailabilitySlot.query.order_by(AvailabilitySlot.start_time.desc()).all()
-    return render_template('admin/availability.html', slots=slots)
+# REMOVED: Admin Availability Management - Not needed for service approval workflow
+# @admin_bp.route('/availability')
+# @login_required
+# @admin_required
+# def availability():
+#     """Admin page to view all availability slots"""
+#     slots = AvailabilitySlot.query.order_by(AvailabilitySlot.start_time.desc()).all()
+#     return render_template('admin/availability.html', slots=slots)
 
 
 @admin_bp.route('/messages')

@@ -8,6 +8,12 @@ This module demonstrates:
 
 These manager classes handle business logic separately from routes (MVC pattern)
 
+SCRATCH DATA STRUCTURES USED:
+1. HashMap - Caching featured services (O(1) lookup)
+2. Queue - FIFO order processing (O(1) enqueue/dequeue)
+3. Trie - Search autocomplete (O(k) prefix search)
+4. MaxHeap - Top-rated services sorting (O(log n) operations)
+
 Author: SkillVerse Team
 Purpose: Centralized business logic with data structure demonstrations
 """
@@ -21,6 +27,9 @@ from sqlalchemy.orm import joinedload
 
 from flask import current_app
 
+# Import scratch data structures (Production implementations)
+from custom_data_structures import HashMap, Queue, Trie, MaxHeap
+
 class ServiceManager:
     """
     Service Manager Class - Handles all service-related operations
@@ -31,61 +40,100 @@ class ServiceManager:
     - SINGLETON PATTERN: Single instance manages all services
     
     Data Structures Used:
-    - DICTIONARY (HashMap): For caching - O(1) lookup time
-    - HEAP: For efficient top-N selection
-    - SET: For unique tag management
+    - HASHMAP: For caching - O(1) lookup time (Line ~45)
+    - MAXHEAP: For efficient top-N selection (Line ~60)
+    - TRIE: For autocomplete (initialized in SearchEngine)
     """
     
     def __init__(self):
         """
-        Initialize ServiceManager with cache
+        Initialize ServiceManager with HashMap cache
         
-        Data Structure: DICTIONARY for caching
-        - Key: cache identifier (string)
-        - Value: cached data
-        - Benefit: O(1) lookup time for frequently accessed data
+        Data Structure: HASHMAP (Scratch Implementation)
+        Location: Line ~45
+        Purpose: Cache featured services to avoid repeated DB queries
+        
+        How it works:
+        1. User visits homepage → DB query → store in cache
+        2. User visits AGAIN → cache hit → instant return!
+        3. Admin approves service → cache.clear() → fresh data
+        
+        Performance: O(1) lookup vs O(n) database query
         """
-        self._cache = {}  # Private attribute (encapsulation)
+        self._cache = HashMap(capacity=16)  # 16 buckets for hash table
         self._cache_timeout = 300  # Cache timeout in seconds (5 minutes)
 
     def get_featured_services(self, limit=4):
         """
-        Get top-rated featured services using HEAP data structure
+        Get top-rated featured services using MAXHEAP data structure
         
-        Data Structure: HEAP (Priority Queue)
-        Algorithm: heapq.nlargest() for efficient top-N selection
-        Time Complexity: O(n log k) where k = limit
+        Data Structure: MAXHEAP (Scratch Implementation)
+        Location: Line ~60
+        Purpose: Efficiently get top N highest-rated services
+        
+        Algorithm:
+        1. Check HashMap cache first (O(1))
+        2. If cache miss → Query database
+        3. Insert all services into MaxHeap with ratings
+        4. Extract top 4 services (automatically sorted)
+        5. Store in HashMap cache for next time
+        
+        Time Complexity: O(n log n) for heap operations
+        Space Complexity: O(n) for heap storage
+        
+        Example Flow:
+        User visits homepage →
+          Check cache['featured_services_4'] →
+            Cache HIT? → Return instantly! ✅
+            Cache MISS? → DB query → MaxHeap sort → Cache → Return
         
         Args:
-            limit (int): Number of services to return
+            limit (int): Number of services to return (default 4)
             
         Returns:
             list: Top-rated Service objects
         """
-        # Check cache first
+        # Check HashMap cache first
         cache_key = f'featured_services_{limit}'
-        if cache_key in self._cache:
-            cached_data, timestamp = self._cache[cache_key]
+        cached_data = self._cache.get(cache_key)
+        
+        if cached_data is not None:
+            cached_services, timestamp = cached_data
+            # Check if cache is still valid (within timeout)
             if (datetime.now() - timestamp).seconds < self._cache_timeout:
-                return cached_data
+                print(f"✅ CACHE HIT: Returning {limit} services from HashMap cache")
+                return cached_services
+        
+        print(f"❌ CACHE MISS: Querying database and building MaxHeap")
         
         # Get all active AND approved services with eager loading
-        # Eager load category and provider (user) to prevent DetachedInstanceError when caching
         services = Service.query.options(
             joinedload(Service.category),
             joinedload(Service.provider)
         ).filter_by(is_active=True, is_approved=True).all()
         
-        # Use heap to get top N services by rating
-        # heapq.nlargest is more efficient than sorting entire list
-        featured = heapq.nlargest(
-            limit,
-            services,
-            key=lambda s: (s.get_average_rating(), s.get_review_count())
-        )
+        # Use MaxHeap to get top N services by rating
+        # MaxHeap automatically keeps highest ratings at top
+        heap = MaxHeap()
         
-        # Cache the result
-        self._cache[cache_key] = (featured, datetime.now())
+        for service in services:
+            rating = service.get_average_rating()
+            review_count = service.get_review_count()
+            # Insert tuple: (rating, review_count, service)
+            # MaxHeap will sort by first element (rating)
+            heap.insert((rating, review_count, service))
+        
+        # Extract top N services from MaxHeap
+        featured = []
+        for _ in range(min(limit, len(heap))):
+            if not heap.is_empty():
+                rating, review_count, service = heap.extract_max()
+                featured.append(service)
+                print(f"  → Service: {service.title} | Rating: {rating} | Reviews: {review_count}")
+        
+        # Store in HashMap cache with timestamp
+        self._cache.set(cache_key, (featured, datetime.now()))
+        print(f"✅ Cached {len(featured)} services in HashMap")
         
         return featured
     
@@ -319,6 +367,8 @@ class ServiceManager:
         """
         Approve a service (Admin only)
         
+        IMPORTANT: Clear HashMap cache and rebuild Trie after approval
+        
         Args:
             service_id (int): Service ID
             
@@ -333,8 +383,13 @@ class ServiceManager:
         service.rejection_reason = None
         db.session.commit()
         
-        # Clear cache so the new service appears in listings
+        # Clear HashMap cache so new service appears in featured list
         self._cache.clear()
+        print(f"✅ HashMap cache cleared after approving service #{service_id}")
+        
+        # Rebuild Trie so new service appears in autocomplete
+        search_engine.rebuild_trie()
+        print(f"✅ Trie rebuilt after approving service #{service_id}")
         
         # Notify the provider
         notification_manager.create_notification(
@@ -509,28 +564,120 @@ class SearchEngine:
     Advanced Search Engine with Autocomplete
     
     Data Structures:
-    - TRIE: For efficient autocomplete
-    - INVERTED INDEX: For fast text search
-    - DICTIONARY: For caching
+    - TRIE: For efficient autocomplete (O(k) prefix search)
+    - HASHMAP: For caching search results
     """
     
     def __init__(self):
         """
-        Initialize search engine with data structures
+        Initialize search engine with Trie and HashMap
+        
+        Data Structure 1: TRIE (Scratch Implementation)
+        Location: Line ~535
+        Purpose: Instant autocomplete as user types
+        
+        Data Structure 2: HASHMAP (Scratch Implementation)
+        Purpose: Cache autocomplete results
+        
+        How Trie works:
+        1. Build Trie from all service titles and tags
+        2. User types "lo" → Trie walks: root → l → o
+        3. Collect all words below "lo" node
+        4. Return: ['Logo', 'Logo Design']
+        
+        Performance: O(k) where k = prefix length
         """
-        self.suggestions_cache = {}  # Dictionary for caching
+        self._trie = Trie()  # Trie for autocomplete
+        self.suggestions_cache = HashMap(capacity=16)  # HashMap for caching
+        self._trie_built = False  # Flag to track if Trie is built
+    
+    def _build_trie(self):
+        """
+        Build Trie from all service titles and tags
+        
+        Called once when first autocomplete request comes
+        
+        Steps:
+        1. Query all active services
+        2. Insert each title into Trie
+        3. Insert each tag into Trie
+        4. Set _trie_built = True
+        
+        Example:
+        Service 1: "Logo Design" with tags "logo, design, branding"
+        Service 2: "Professional Website" with tags "web, development"
+        
+        Trie will contain:
+        - Logo, Logo Design, logo, design, branding
+        - Professional, Professional Website, web, development
+        """
+        if self._trie_built:
+            return
+        
+        print("🔨 Building Trie from service titles and tags...")
+        
+        services = Service.query.filter_by(is_active=True, is_approved=True).all()
+        word_count = 0
+        
+        for service in services:
+            # Insert service title
+            if service.title:
+                self._trie.insert(service.title)
+                word_count += 1
+            
+            # Insert tags
+            if service.tags:
+                tags = service.get_tags_list()
+                for tag in tags:
+                    if tag.strip():
+                        self._trie.insert(tag.strip())
+                        word_count += 1
+        
+        self._trie_built = True
+        print(f"✅ Trie built with {word_count} words from {len(services)} services")
+    
+    def rebuild_trie(self):
+        """
+        Rebuild Trie (called when new service is added)
+        
+        Used when: Admin approves new service
+        """
+        self._trie = Trie()
+        self._trie_built = False
+        self.suggestions_cache.clear()
+        self._build_trie()
     
     def get_autocomplete_suggestions(self, query, limit=5):
         """
-        Get autocomplete suggestions for search query
+        Get autocomplete suggestions using TRIE data structure
+        
+        Data Structure: TRIE (Scratch Implementation)
+        Location: Line ~600
+        Purpose: Instant prefix-based search
         
         Algorithm:
-        1. Check cache
-        2. Search in service titles and tags
-        3. Return top matches
+        1. Check HashMap cache first
+        2. If cache miss → Build Trie (if not built)
+        3. Search Trie with prefix
+        4. Cache results in HashMap
+        5. Return suggestions
+        
+        Time Complexity: O(k + m)
+        - k = prefix length
+        - m = number of matches
+        
+        Example Flow:
+        User types "lo" →
+          Check cache['lo'] →
+            Cache HIT? → Return ['Logo', 'Logo Design'] ✅
+            Cache MISS? →
+              Trie.search_prefix("lo") →
+                Walk: root → l → o (2 steps)
+                Collect words below: ['Logo', 'Logo Design']
+                Cache result → Return
         
         Args:
-            query (str): Partial search query
+            query (str): Partial search query (prefix)
             limit (int): Maximum suggestions
             
         Returns:
@@ -539,39 +686,28 @@ class SearchEngine:
         if not query or len(query) < 2:
             return []
         
-        # Check cache
+        # Check HashMap cache first
         cache_key = query.lower()
-        if cache_key in self.suggestions_cache:
-            return self.suggestions_cache[cache_key]
+        cached_result = self.suggestions_cache.get(cache_key)
         
-        # Search in titles and tags
-        suggestions = set()  # Use SET to avoid duplicates
+        if cached_result is not None:
+            print(f"✅ CACHE HIT: Autocomplete for '{query}' from HashMap")
+            return cached_result
         
-        search_term = f'%{query.lower()}%'
-        services = Service.query.filter(
-            Service.is_active == True,
-            db.or_(
-                Service.title.ilike(search_term),
-                Service.tags.ilike(search_term)
-            )
-        ).limit(limit * 2).all()
+        print(f"❌ CACHE MISS: Searching Trie for '{query}'")
         
-        # Extract suggestions from titles
-        for service in services:
-            suggestions.add(service.title)
-            # Add tags
-            if service.tags:
-                for tag in service.get_tags_list():
-                    if query.lower() in tag.lower():
-                        suggestions.add(tag)
+        # Build Trie if not built yet
+        self._build_trie()
         
-        # Convert to sorted list
-        result = sorted(suggestions)[:limit]
+        # Search Trie for prefix matches
+        suggestions = self._trie.search_prefix(query, limit=limit)
         
-        # Cache the result
-        self.suggestions_cache[cache_key] = result
+        print(f"  → Trie found {len(suggestions)} matches: {suggestions}")
         
-        return result
+        # Cache the result in HashMap
+        self.suggestions_cache.set(cache_key, suggestions)
+        
+        return suggestions
     
     def search_by_tags(self, tags):
         """
@@ -691,19 +827,38 @@ class OrderManager:
     """
     Order Management System
     
-    Data Structure: QUEUE for order processing
+    Data Structure: QUEUE (Scratch Implementation) for FIFO order processing
+    Location: Line ~715
+    Purpose: Fair order processing - first come, first served
+    
     OOP Concepts: STATE MANAGEMENT
     """
     
     def __init__(self):
         """
-        Initialize with order queue
+        Initialize with Queue for order processing
         
-        Data Structure: DEQUE (Double-ended queue)
-        - Efficient for adding/removing from both ends
-        - Used for order processing queue
+        Data Structure: QUEUE (Scratch Implementation)
+        Location: Line ~715
+        Purpose: Process orders in FIFO order (First In First Out)
+        
+        How it works:
+        1. Customer A places order #101 → enqueue(101)
+        2. Customer B places order #102 → enqueue(102)
+        3. Customer C places order #103 → enqueue(103)
+        4. Queue: [101 → 102 → 103]
+        5. Provider processes → dequeue() → Order #101 (came first!)
+        6. Provider processes → dequeue() → Order #102 (came second!)
+        
+        Internal Structure:
+        Linked list with front and rear pointers:
+        [FRONT] 101 → 102 → 103 [REAR]
+                ↑              ↑
+             dequeue        enqueue
+        
+        Performance: O(1) enqueue, O(1) dequeue
         """
-        self.processing_queue = deque()  # Queue for pending orders
+        self.processing_queue = Queue()  # FIFO queue for fair processing
     
     def create_order(self, service_id, buyer_id, requirements='', scope='', budget_tier='Standard', deadline=None):
         """
@@ -746,8 +901,9 @@ class OrderManager:
         db.session.add(order)
         db.session.commit()
         
-        # Add to processing queue
-        self.processing_queue.append(order.id)
+        # Add to Queue for FIFO processing
+        self.processing_queue.enqueue(order.id)
+        print(f"✅ Order #{order.id} added to Queue | Queue size: {len(self.processing_queue)}")
         
         # Send notification to seller about new order
         buyer = User.query.get(buyer_id)
@@ -764,10 +920,26 @@ class OrderManager:
         return order
     
     def accept_order(self, order_id):
-        """Provider accepts order"""
+        """
+        Provider accepts order
+        
+        When seller accepts:
+        - Order status changes to 'in_progress'
+        - Money automatically added to seller's wallet
+        """
         order = Order.query.get(order_id)
         if order and order.status == 'pending':
             order.update_status('in_progress')
+            
+            # Automatic payment to seller's wallet
+            from payment_system import WalletManager
+            wallet_mgr = WalletManager()
+            
+            # Add money to seller's wallet
+            payment_amount = order.total_price
+            wallet_mgr.add_money(order.seller_id, payment_amount, 
+                               description=f"Payment for order #{order.id} - {order.service.title}")
+            
             db.session.commit()
             return True
         return False
@@ -781,12 +953,49 @@ class OrderManager:
             return True
         return False
     
-    def reject_order(self, order_id):
-        """Provider rejects/declines an order"""
+    def reject_order(self, order_id, rejection_reason=''):
+        """
+        Provider rejects/declines an order
+        
+        Simple cancellation with automatic refund:
+        - Order cancelled
+        - Money automatically refunded to buyer's wallet
+        - Buyer notified with reason
+        
+        Args:
+            order_id (int): Order ID
+            rejection_reason (str): Reason for rejection
+            
+        Returns:
+            bool: True if successful
+        """
         order = Order.query.get(order_id)
         if order and order.status == 'pending':
+            # Update order status
             order.update_status('cancelled')
+            order.rejection_reason = rejection_reason or 'Seller unavailable'
+            order.can_review = False  # Disable reviews for rejected orders
+            
+            # Automatic refund to buyer's wallet (as CREDIT, not debit)
+            from payment_system import WalletManager
+            from models import User
+            wallet_mgr = WalletManager()
+            
+            # Get buyer username for transaction record
+            buyer = User.query.get(order.buyer_id)
+            buyer_username = buyer.username if buyer else f'User #{order.buyer_id}'
+            
+            # Credit refund to buyer's wallet
+            refund_amount = order.total_price
+            wallet_mgr.credit_seller(
+                user_id=order.buyer_id,
+                amount=refund_amount,
+                description=f"Refund for cancelled order #{order.id}",
+                username=buyer_username
+            )
+            
             db.session.commit()
+            
             return True
         return False
 
@@ -1281,7 +1490,14 @@ class AvailabilityManager:
         return True, None
 
     def approve_booking(self, booking_id, provider_id):
-        """Approve a booking and create an order if needed"""
+        """
+        Approve a booking request
+        
+        When provider approves booking:
+        - Booking status → 'confirmed'
+        - Order remains 'pending' (seller must explicitly accept/reject)
+        - Seller can now see Accept/Reject buttons on order page
+        """
         from models import Booking, Order
         
         booking = Booking.query.get(booking_id)
@@ -1296,9 +1512,8 @@ class AvailabilityManager:
             
         booking.status = 'confirmed'
         
-        # Create Order if not exists
+        # Create Order if not exists (but keep it PENDING)
         if not booking.order_id:
-            # ... (existing code for creating order) ...
             service = booking.service
             if service:
                 from managers import order_manager
@@ -1311,13 +1526,10 @@ class AvailabilityManager:
                 )
                 if order:
                      booking.order_id = order.id
-                     # Auto-accept order since provider approved booking
-                     order.update_status('in_progress')
-        else:
-            # Order exists, update status to in_progress if currently pending
-            order = Order.query.get(booking.order_id)
-            if order and order.status == 'pending':
-                order.update_status('in_progress')
+                     # Keep order PENDING - seller must explicitly accept/reject
+        
+        # If order already exists, keep it pending
+        # Seller will see Accept/Reject buttons on order detail page
             
         db.session.commit()
         return True, None

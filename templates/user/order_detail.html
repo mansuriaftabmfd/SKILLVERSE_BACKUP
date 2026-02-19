@@ -162,12 +162,35 @@
 <div style="margin-top: 80px;"></div>
 
 <div class="container py-4">
-    <!-- Header -->
+    <!-- Cancellation Reason Alert (for Buyer) -->
+    {% if order.status == 'cancelled' and order.rejection_reason and current_user.id == order.buyer_id %}
+    <div class="alert alert-danger fade-in-up mb-4 shadow-sm border-danger border-opacity-25 rounded-3">
+        <div class="d-flex align-items-start">
+            <div class="bg-danger bg-opacity-10 p-3 rounded-circle me-3 text-danger">
+                <i class="bi bi-x-circle-fill fs-4"></i>
+            </div>
+            <div class="flex-grow-1">
+                <h5 class="fw-bold mb-2 text-danger">Order Cancelled by Seller</h5>
+                <p class="mb-2"><strong>Cancellation Reason:</strong></p>
+                <div class="bg-white p-3 rounded-3 border border-danger border-opacity-25">
+                    <i class="bi bi-quote text-danger"></i>
+                    <span class="ms-2">{{ order.rejection_reason }}</span>
+                </div>
+                <p class="mb-0 mt-3 small text-muted">
+                    <i class="bi bi-check-circle-fill text-success me-1"></i>
+                    <strong>₹{{ "%.0f"|format(order.total_price) }}</strong> has been refunded to your wallet.
+                </p>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Booking Declined Alert -->
     {% if booking and (booking.status == 'cancelled' or booking.status == 'rejected') and current_user.id ==
     order.buyer_id %}
     <div
-        class="alert alert-danger fade-in-up mb-4 shadow-sm border-danger border-opacity-25 d-flex align-items-center rounded-3">
-        <div class="bg-danger bg-opacity-10 p-2 rounded-circle me-3 text-danger">
+        class="alert alert-warning fade-in-up mb-4 shadow-sm border-warning border-opacity-25 d-flex align-items-center rounded-3">
+        <div class="bg-warning bg-opacity-10 p-2 rounded-circle me-3 text-warning">
             <i class="bi bi-exclamation-triangle-fill fs-5"></i>
         </div>
         <div>
@@ -282,9 +305,43 @@
                         <div class="fs-2 fw-bold" style="color: var(--accent-color);">₹{{
                             "%.0f"|format(order.total_price) }}</div>
                     </div>
+
+                    <!-- Cancellation Reason (for both buyer and seller) -->
+                    {% if order.status == 'cancelled' and order.rejection_reason %}
+                    <div class="pt-3 mt-3 border-top" style="border-color: var(--workroom-border) !important;">
+                        <span class="info-label">Cancellation Reason</span>
+                        <div class="p-3 rounded-3 bg-danger bg-opacity-10 border border-danger border-opacity-25">
+                            <i class="bi bi-info-circle-fill text-danger me-2"></i>
+                            <span class="small">{{ order.rejection_reason }}</span>
+                        </div>
+                        {% if current_user.id == order.buyer_id %}
+                        <div class="mt-2 small text-success">
+                            <i class="bi bi-check-circle-fill me-1"></i>
+                            Refund processed: ₹{{ "%.0f"|format(order.total_price) }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </div>
 
-                <!-- Actions -->
+                <!-- Certificate Section (for Buyer on Completed Orders) -->
+                {% if current_user.id == order.buyer_id and order.status == 'completed' %}
+                <div class="card-footer bg-white p-4 border-top">
+                    <h6 class="fw-bold mb-3 d-flex align-items-center">
+                        <i class="bi bi-award-fill text-warning me-2"></i>
+                        Get Your Certificate
+                    </h6>
+                    <p class="small text-muted mb-3">
+                        Download your completion certificate and share it on LinkedIn or WhatsApp!
+                    </p>
+                    <button class="btn btn-primary w-100 py-2 rounded-pill shadow-sm mb-2" 
+                            data-bs-toggle="modal" data-bs-target="#certificateModal">
+                        <i class="bi bi-download me-2"></i>Download Certificate
+                    </button>
+                </div>
+                {% endif %}
+
+                <!-- Actions (for Seller) -->
                 {% if current_user.id == order.seller_id %}
                 <div class="card-footer bg-white p-4 border-top">
                     {% if order.status == 'pending' %}
@@ -295,16 +352,22 @@
                         <i class="bi bi-exclamation-circle-fill me-1"></i> Please approve the booking slot in
                         <strong>Manage Availability</strong> before accepting the order.
                     </div>
-                    <button class="btn btn-secondary w-100 py-2 rounded-pill disabled" disabled>
+                    <button class="btn btn-secondary w-100 py-2 rounded-pill disabled mb-2" disabled>
                         <i class="bi bi-lock-fill me-2"></i>Accept Order
                     </button>
                     {% else %}
-                    <form action="{{ url_for('user.order_action', order_id=order.id, action='accept') }}" method="POST">
+                    <form action="{{ url_for('user.order_action', order_id=order.id, action='accept') }}" method="POST" class="mb-2">
                         <button class="btn btn-success w-100 py-2 rounded-pill shadow-sm btn-sweep">
                             <i class="bi bi-check-circle me-2"></i>Accept Order
                         </button>
                     </form>
                     {% endif %}
+                    
+                    <!-- Reject Button -->
+                    <button class="btn btn-outline-danger w-100 py-2 rounded-pill" data-bs-toggle="modal" data-bs-target="#rejectOrderModal">
+                        <i class="bi bi-x-circle me-2"></i>Reject Order
+                    </button>
+                    
                     {% elif order.status == 'in_progress' %}
                     <h6 class="fw-bold mb-3">Project Status</h6>
                     <form action="{{ url_for('user.order_action', order_id=order.id, action='complete') }}"
@@ -343,13 +406,18 @@
 
                 <div class="chat-messages" id="chat-messages">
                     {% if order.status == 'pending' %}
-                    <div
-                        class="d-flex h-100 align-items-center justify-content-center flex-column text-muted opacity-75">
+                    <div class="d-flex h-100 align-items-center justify-content-center flex-column text-muted opacity-75">
                         <div class="bg-light p-4 rounded-circle mb-3 border">
                             <i class="bi bi-lock-fill fs-1"></i>
                         </div>
                         <h5 class="fw-bold">Chat Locked</h5>
-                        <p class="small text-center px-4">Conversation will open once the order is accepted.</p>
+                        <p class="small text-center px-4">
+                            {% if booking and booking.status != 'confirmed' %}
+                            Waiting for seller to approve the booking slot.
+                            {% else %}
+                            Waiting for seller to accept the order.
+                            {% endif %}
+                        </p>
                     </div>
                     {% elif messages|length == 0 %}
                     <div class="text-center py-5 mt-5">
@@ -401,6 +469,16 @@
                         <h6 class="fw-bold mb-1">Order Completed</h6>
                         <p class="small mb-0 opacity-75">Chat is closed for this order. Start a new order to chat again.
                         </p>
+                    </div>
+                </div>
+                {% elif order.status == 'cancelled' %}
+                <div class="chat-input-area bg-light text-center py-4">
+                    <div class="text-muted d-flex align-items-center justify-content-center flex-column">
+                        <div class="bg-danger bg-opacity-10 p-3 rounded-circle mb-2 text-danger">
+                            <i class="bi bi-x-circle-fill fs-4"></i>
+                        </div>
+                        <h6 class="fw-bold mb-1">Order Cancelled</h6>
+                        <p class="small mb-0 opacity-75">This order was cancelled.</p>
                     </div>
                 </div>
                 {% endif %}
@@ -463,6 +541,201 @@
                 <div class="modal-footer border-0 p-4 pt-0 justify-content-center gap-2">
                     <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Back</button>
                     <button type="submit" class="btn btn-primary rounded-pill px-5 btn-sweep">Confirm Booking</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Certificate Modal -->
+<div class="modal fade" id="certificateModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4">
+            <div class="modal-header border-0 bg-gradient p-4" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                <div class="text-white">
+                    <h5 class="modal-title fw-bold mb-1">
+                        <i class="bi bi-award-fill me-2"></i>Get Your Certificate
+                    </h5>
+                    <p class="small mb-0 opacity-90">Celebrate your achievement!</p>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            
+            {% if order.certificate_name %}
+            <!-- Certificate Already Generated - Show Download Only -->
+            <div class="modal-body p-4">
+                <div class="text-center mb-4">
+                    <div class="bg-success bg-opacity-10 p-4 rounded-circle d-inline-flex mb-3">
+                        <i class="bi bi-check-circle-fill text-success" style="font-size: 3rem;"></i>
+                    </div>
+                    <h6 class="fw-bold">Certificate Ready!</h6>
+                    <p class="small text-muted">Your certificate has been generated</p>
+                </div>
+
+                <div class="alert alert-success border-0 mb-4">
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-person-badge-fill fs-4 me-3"></i>
+                        <div>
+                            <small class="text-muted d-block">Certificate Name:</small>
+                            <strong class="fs-5">{{ order.certificate_name }}</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="alert alert-info border-0 mb-4">
+                    <div class="d-flex align-items-start">
+                        <i class="bi bi-info-circle-fill me-2 mt-1"></i>
+                        <div class="small">
+                            <strong>Note:</strong> Your name is locked and cannot be changed to maintain certificate authenticity.
+                        </div>
+                    </div>
+                </div>
+
+                <form action="{{ url_for('user.generate_certificate', order_id=order.id) }}" method="GET">
+                    <button type="submit" class="btn btn-primary w-100 py-3 rounded-pill shadow-sm mb-3">
+                        <i class="bi bi-download me-2"></i>Download Certificate
+                    </button>
+                </form>
+
+                <!-- Share Options -->
+                <div class="border-top pt-4">
+                    <h6 class="fw-bold mb-3">Share Your Achievement</h6>
+                    <div class="d-grid gap-2">
+                        <a href="https://www.linkedin.com/sharing/share-offsite/?url={{ request.url_root }}" 
+                           class="btn btn-outline-primary" target="_blank">
+                            <i class="bi bi-linkedin me-2"></i>Share on LinkedIn
+                        </a>
+                        <a href="https://wa.me/?text=🎓 I just completed {{ order.service.title }} on SkillVerse! Check out SkillVerse: {{ request.url_root }}" 
+                           class="btn btn-outline-success" target="_blank">
+                            <i class="bi bi-whatsapp me-2"></i>Share on WhatsApp
+                        </a>
+                    </div>
+                </div>
+            </div>
+            
+            {% else %}
+            <!-- First Time - Enter Name -->
+            <form action="{{ url_for('user.generate_certificate', order_id=order.id) }}" method="POST" id="certificateForm">
+                <div class="modal-body p-4">
+                    <div class="text-center mb-4">
+                        <div class="bg-warning bg-opacity-10 p-4 rounded-circle d-inline-flex mb-3">
+                            <i class="bi bi-trophy-fill text-warning" style="font-size: 3rem;"></i>
+                        </div>
+                        <h6 class="fw-bold">Completion Certificate</h6>
+                        <p class="small text-muted">For: {{ order.service.title }}</p>
+                    </div>
+
+                    <!-- WARNING ALERT -->
+                    <div class="alert alert-warning border-0 mb-4">
+                        <div class="d-flex align-items-start">
+                            <i class="bi bi-exclamation-triangle-fill fs-4 me-3 mt-1"></i>
+                            <div>
+                                <strong class="d-block mb-2">⚠️ IMPORTANT - READ CAREFULLY!</strong>
+                                <ul class="mb-0 ps-3 small">
+                                    <li><strong>Enter your name carefully</strong></li>
+                                    <li><strong>Once saved, it CANNOT be changed</strong></li>
+                                    <li>This ensures certificate authenticity</li>
+                                    <li>Double-check spelling before submitting</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Your Full Name on Certificate *</label>
+                        <input type="text" class="form-control form-control-lg" name="buyer_name" 
+                               value="{{ current_user.full_name or current_user.username }}" 
+                               placeholder="Enter your full name" required 
+                               pattern="[A-Za-z\s]+" 
+                               title="Only letters and spaces allowed"
+                               minlength="3"
+                               maxlength="50">
+                        <small class="text-danger fw-bold">⚠️ This name will be PERMANENT and cannot be edited later!</small>
+                    </div>
+
+                    <div class="alert alert-info border-0 mb-0">
+                        <div class="d-flex align-items-start">
+                            <i class="bi bi-info-circle-fill me-2 mt-1"></i>
+                            <div class="small">
+                                <strong>What you'll get:</strong>
+                                <ul class="mb-0 mt-2 ps-3">
+                                    <li>Professional completion certificate</li>
+                                    <li>High-quality PNG image</li>
+                                    <li>Ready to share on LinkedIn</li>
+                                    <li>Perfect for your portfolio</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-0 p-4 pt-0">
+                    <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary rounded-pill px-4">
+                        <i class="bi bi-lock-fill me-2"></i>Generate & Lock Certificate
+                    </button>
+                </div>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Reject Order Modal -->
+<div class="modal fade" id="rejectOrderModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4">
+            <div class="modal-header border-0 bg-danger bg-opacity-10 p-4">
+                <div>
+                    <h5 class="modal-title fw-bold text-danger">Cancel Order</h5>
+                    <p class="small text-muted mb-0">Buyer will be notified</p>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{{ url_for('user.order_action', order_id=order.id, action='reject') }}" method="POST">
+                <div class="modal-body p-4">
+                    <div class="alert alert-info border-0 mb-4">
+                        <div class="d-flex align-items-start">
+                            <i class="bi bi-info-circle-fill fs-5 me-2 mt-1"></i>
+                            <div>
+                                <strong>Cancellation Policy:</strong>
+                                <p class="mb-0 mt-2 small">
+                                    When you cancel this order, <strong>₹{{ "%.0f"|format(order.total_price) }}</strong> will be automatically refunded to the buyer's wallet. 
+                                    They will receive an email notification with your cancellation reason.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Reason for Cancellation *</label>
+                        <select class="form-select" id="rejectionReasonSelect" name="rejection_reason" required onchange="toggleOtherReasonField()">
+                            <option value="">Select a reason...</option>
+                            <option value="Currently unavailable">Currently unavailable</option>
+                            <option value="Schedule conflict">Schedule conflict</option>
+                            <option value="Outside my expertise">Outside my expertise</option>
+                            <option value="Too busy with other projects">Too busy with other projects</option>
+                            <option value="Personal emergency">Personal emergency</option>
+                            <option value="Other">Other (please specify)</option>
+                        </select>
+                    </div>
+
+                    <!-- Other Reason Text Field (Hidden by default) -->
+                    <div class="mb-3 d-none" id="otherReasonField">
+                        <label class="form-label fw-bold">Please specify your reason *</label>
+                        <textarea class="form-control" id="otherReasonText" name="other_reason" rows="3" 
+                            placeholder="Please provide details about why you're cancelling this order..."></textarea>
+                    </div>
+
+                    <div class="alert alert-warning border-0 small">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                        <strong>Note:</strong> Frequent cancellations may affect your seller rating.
+                    </div>
+                </div>
+                <div class="modal-footer border-0 p-4 pt-0">
+                    <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Back</button>
+                    <button type="submit" class="btn btn-danger rounded-pill px-4">
+                        <i class="bi bi-x-circle me-2"></i>Cancel Order
+                    </button>
                 </div>
             </form>
         </div>
@@ -581,6 +854,74 @@
 
     document.getElementById('send-btn')?.addEventListener('click', sendMessage);
     document.getElementById('message-input')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+
+    // Toggle "Other" reason text field
+    function toggleOtherReasonField() {
+        const select = document.getElementById('rejectionReasonSelect');
+        const otherField = document.getElementById('otherReasonField');
+        const otherText = document.getElementById('otherReasonText');
+        
+        if (select.value === 'Other') {
+            otherField.classList.remove('d-none');
+            otherText.required = true;
+        } else {
+            otherField.classList.add('d-none');
+            otherText.required = false;
+            otherText.value = '';
+        }
+    }
+
+    // Handle reject order form submission
+    const rejectForm = document.querySelector('#rejectOrderModal form');
+    if (rejectForm) {
+        rejectForm.addEventListener('submit', function(e) {
+            const select = document.getElementById('rejectionReasonSelect');
+            const otherText = document.getElementById('otherReasonText');
+            
+            // If "Other" is selected, use the custom text as the reason
+            if (select.value === 'Other' && otherText.value.trim()) {
+                // Create a hidden input with the custom reason
+                const hiddenInput = document.createElement('input');
+                hiddenInput.type = 'hidden';
+                hiddenInput.name = 'rejection_reason';
+                hiddenInput.value = otherText.value.trim();
+                this.appendChild(hiddenInput);
+                
+                // Remove the name attribute from select to avoid duplicate submission
+                select.removeAttribute('name');
+            }
+        });
+    }
+
+    // Certificate download and share
+    const certificateForm = document.getElementById('certificateForm');
+    if (certificateForm) {
+        certificateForm.addEventListener('submit', function(e) {
+            // Form will submit normally and download the certificate
+            // After download, show share options
+            setTimeout(function() {
+                const shareOptions = document.getElementById('shareOptions');
+                if (shareOptions) {
+                    shareOptions.classList.remove('d-none');
+                }
+                
+                // Setup share links
+                const serviceName = "{{ order.service.title }}";
+                const linkedInBtn = document.getElementById('shareLinkedIn');
+                const whatsAppBtn = document.getElementById('shareWhatsApp');
+                
+                if (linkedInBtn) {
+                    const linkedInText = `I just completed "${serviceName}" on SkillVerse! 🎓 Check out my certificate and explore amazing skills on SkillVerse.`;
+                    linkedInBtn.href = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(window.location.origin)}`;
+                }
+                
+                if (whatsAppBtn) {
+                    const whatsAppText = `🎓 I just completed "${serviceName}" on SkillVerse! Check out SkillVerse for amazing skill-building opportunities: ${window.location.origin}`;
+                    whatsAppBtn.href = `https://wa.me/?text=${encodeURIComponent(whatsAppText)}`;
+                }
+            }, 1000);
+        });
+    }
 
     // Calendar Logic
     document.addEventListener('DOMContentLoaded', function () {

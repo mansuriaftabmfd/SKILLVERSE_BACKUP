@@ -103,7 +103,127 @@
             </div>
         </div>
 
-        <!-- Row 3: Recent Orders Table -->
+        <!-- Row 3: My Learning (Pending/In-Progress Orders) -->
+        <div class="panel span-4">
+            <div class="panel-header">
+                <span class="panel-title">📚 My Learning</span>
+                <a href="{{ url_for('user.orders') }}" class="btn-action">View All</a>
+            </div>
+            <div style="overflow-x: auto;">
+                {% set active_orders = orders|selectattr('status', 'in', ['pending', 'in_progress'])|list if orders else [] %}
+                {% if active_orders %}
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>Service</th>
+                            <th>Provider</th>
+                            <th>Started</th>
+                            <th>Status</th>
+                            <th class="text-end">Progress</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for order in active_orders %}
+                        {% if loop.index <= 5 %}
+                        <tr onclick="window.location.href='{{ url_for('user.order_detail', order_id=order.id) }}'" style="cursor:pointer;">
+                            <td>
+                                <div class="d-flex align-items-center gap-3">
+                                    <div class="icon-box icon-blue" style="width:32px; height:32px; font-size:1rem;">
+                                        <i class="bi bi-book"></i>
+                                    </div>
+                                    <span style="font-weight:600;">{{ order.service.title }}</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center gap-2">
+                                    <img src="{{ order.service.provider.get_avatar_url() }}" width="24" height="24" class="rounded-circle">
+                                    <span>{{ order.service.provider.username }}</span>
+                                </div>
+                            </td>
+                            <td class="text-secondary">{{ order.created_at.strftime('%b %d') }}</td>
+                            <td>
+                                <span class="status {{ 'status-pending' if order.status=='pending' else 'status-active' }}">
+                                    {{ 'Waiting' if order.status=='pending' else 'Learning' }}
+                                </span>
+                            </td>
+                            <td class="text-end">
+                                {% if order.status == 'pending' %}
+                                <span class="badge bg-warning text-dark">Not Started</span>
+                                {% else %}
+                                <span class="badge bg-primary">In Progress</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endif %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="text-center py-5 text-secondary">
+                    <i class="bi bi-book fs-1 mb-3 d-block"></i>
+                    <p>No active learning sessions. <a href="{{ url_for('service.browse') }}">Browse services</a> to start learning!</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Row 4: Achievements (Completed Orders with Certificates) -->
+        <div class="panel span-4">
+            <div class="panel-header">
+                <span class="panel-title">🏆 My Achievements</span>
+                <a href="{{ url_for('user.orders') }}?status=completed" class="btn-action">View All</a>
+            </div>
+            {% set completed_orders = orders|selectattr('status', 'equalto', 'completed')|list if orders else [] %}
+            {% if completed_orders %}
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; padding: 1rem;">
+                {% for order in completed_orders %}
+                {% if loop.index <= 4 %}
+                <div class="bento-card" style="padding:0; min-height:200px; position:relative; overflow:hidden;">
+                    <!-- Certificate Badge -->
+                    <div style="position:absolute; top:10px; right:10px; background:linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:white; padding:6px 12px; border-radius:20px; font-size:0.75rem; font-weight:700; z-index:2;">
+                        <i class="bi bi-award-fill me-1"></i>Certified
+                    </div>
+                    
+                    <!-- Service Image Background -->
+                    <div style="height:120px; background:linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); position:relative; display:flex; align-items:center; justify-content:center;">
+                        <i class="bi bi-trophy-fill" style="font-size:3rem; color:#667eea; opacity:0.3;"></i>
+                        <img src="{{ order.service.get_image_url() }}" 
+                             style="position:absolute; width:100%; height:100%; object-fit:cover; opacity:0.2;"
+                             onerror="this.style.display='none';">
+                    </div>
+                    
+                    <div style="padding:1.25rem;">
+                        <h4 style="font-size:1rem; font-weight:700; margin-bottom:0.5rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                            {{ order.service.title }}
+                        </h4>
+                        <p class="text-secondary small mb-3">
+                            <i class="bi bi-calendar-check me-1"></i>
+                            Completed {{ order.completed_at.strftime('%b %d, %Y') if order.completed_at else order.updated_at.strftime('%b %d, %Y') }}
+                        </p>
+                        <div class="d-flex gap-2">
+                            <a href="{{ url_for('user.order_detail', order_id=order.id) }}" 
+                               class="btn btn-sm btn-primary flex-grow-1" style="border-radius:8px;">
+                                <i class="bi bi-download me-1"></i>Certificate
+                            </a>
+                            <a href="{{ url_for('user.order_detail', order_id=order.id) }}" 
+                               class="btn btn-sm btn-outline-secondary" style="border-radius:8px;">
+                                <i class="bi bi-eye"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center py-5 text-secondary">
+                <i class="bi bi-trophy fs-1 mb-3 d-block" style="opacity:0.3;"></i>
+                <p>No achievements yet. Complete your first service to earn a certificate!</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Row 5: Recent Orders Table -->
         <div class="panel span-4">
             <div class="panel-header">
                 <span class="panel-title">Recent Orders</span>
@@ -160,7 +280,64 @@
             </div>
         </div>
 
-        <!-- Row 4: Recommendations -->
+        <!-- Row 6: Recommendations -->
+        <div class="panel span-4">
+            <div class="panel-header">
+                <span class="panel-title">Recent Orders</span>
+                <a href="{{ url_for('user.orders') }}" class="btn-action">View All</a>
+            </div>
+            <div style="overflow-x: auto;">
+                {% if orders %}
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>Service</th>
+                            <th>Provider</th>
+                            <th>Date</th>
+                            <th>Status</th>
+                            <th class="text-end">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for order in orders|default([]) %}
+                        {% if loop.index <= 5 %} <tr
+                            onclick="window.location.href='{{ url_for('user.order_detail', order_id=order.id) }}'"
+                            style="cursor:pointer;">
+                            <td>
+                                <div class="d-flex align-items-center gap-3">
+                                    <div class="icon-box icon-blue" style="width:32px; height:32px; font-size:1rem;"><i
+                                            class="bi bi-box-seam"></i></div>
+                                    <span style="font-weight:600;">{{ order.service.title }}</span>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center gap-2">
+                                    <img src="{{ order.service.provider.get_avatar_url() }}" width="24" height="24"
+                                        class="rounded-circle">
+                                    <span>{{ order.service.provider.username }}</span>
+                                </div>
+                            </td>
+                            <td class="text-secondary">{{ order.created_at.strftime('%b %d') }}</td>
+                            <td>
+                                <span
+                                    class="status {{ 'status-pending' if order.status=='pending' else 'status-active' if order.status=='in_progress' else 'status-completed' }}">
+                                    {{ order.status|replace('_',' ')|title }}
+                                </span>
+                            </td>
+                            <td class="text-end" style="font-weight:700;">₹{{
+                                "%.0f"|format(order.service.price|default(0)) }}</td>
+                            </tr>
+                            {% endif %}
+                            {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="text-center py-5 text-secondary">No orders found.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Row 6: Recommendations -->
         <div class="span-4 mt-4">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h3 class="panel-title" style="font-size:1.25rem;">Recommended For You</h3>

@@ -215,3 +215,88 @@ def send_booking_rejection_email(booking):
         service_title=service_title,
         link=link
     )
+
+
+def send_order_rejection_email(order, rejection_reason):
+    """
+    Send order rejection email to customer with refund confirmation
+    
+    Args:
+        order: Order object
+        rejection_reason: Reason for cancellation
+    """
+    try:
+        from flask import current_app
+        from flask_mail import Message
+        from threading import Thread
+        
+        app = current_app._get_current_object()
+        
+        msg = Message(
+            subject=f"Order #{order.id} Cancelled - Refund Processed",
+            recipients=[order.buyer.email],
+            sender=app.config['MAIL_DEFAULT_SENDER']
+        )
+        
+        # Create HTML email body
+        msg.html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }}
+                .content {{ background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; }}
+                .reason-box {{ background-color: #fef3c7; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #f59e0b; }}
+                .reason-box h3 {{ color: #d97706; margin-top: 0; }}
+                .refund-box {{ background-color: #d1fae5; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #10b981; }}
+                .refund-box h3 {{ color: #059669; margin-top: 0; }}
+                .amount {{ font-size: 24px; font-weight: bold; color: #059669; }}
+                .button {{ display: inline-block; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; margin: 10px 0; }}
+                ul {{ padding-left: 20px; }}
+                li {{ margin: 10px 0; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>Order Cancelled</h1>
+                </div>
+                <div class="content">
+                    <p>Dear {order.buyer.full_name or order.buyer.username},</p>
+                    
+                    <p>We're sorry, but your order for <strong>{order.service.title}</strong> has been cancelled by the seller.</p>
+                    
+                    <div class="reason-box">
+                        <h3>Cancellation Reason</h3>
+                        <p style="margin: 0;"><strong>{rejection_reason}</strong></p>
+                    </div>
+                    
+                    <div class="refund-box">
+                        <h3>✓ Refund Processed</h3>
+                        <p style="margin: 0;">Amount refunded: <span class="amount">₹{order.total_price}</span></p>
+                        <p style="margin: 10px 0 0 0; font-size: 14px;">The money has been added back to your wallet and is available for immediate use.</p>
+                    </div>
+                    
+                    <p><strong>What's next?</strong></p>
+                    <ul>
+                        <li>Browse other similar services on SkillVerse</li>
+                        <li>Contact another seller for the same service</li>
+                        <li>Your refunded amount is ready to use for new orders</li>
+                    </ul>
+                    
+                    <p>We apologize for the inconvenience and appreciate your understanding.</p>
+                    
+                    <p>Best regards,<br>SkillVerse Team</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        # Send asynchronously
+        Thread(target=send_async_email, args=(app, msg)).start()
+        
+    except Exception as e:
+        print(f"Error sending rejection email: {e}")

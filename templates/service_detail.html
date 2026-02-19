@@ -368,7 +368,14 @@
                             </ul>
 
                             {% if current_user.is_authenticated %}
-                            {% if current_user.id != service.user_id %}
+                            {% if current_user.user_type == 'admin' %}
+                            {# Admin cannot purchase services - they only manage the platform #}
+                            <div class="alert alert-info border-0 rounded-4 text-center">
+                                <i class="bi bi-shield-check fs-3 mb-2 d-block"></i>
+                                <strong>Admin Account</strong>
+                                <p class="small mb-0">You can manage this service from the admin panel.</p>
+                            </div>
+                            {% elif current_user.id != service.user_id %}
                             <div class="d-grid gap-3">
                                 {% if existing_order %}
                                 {# User has an ACTIVE order - Show Chat instead of Order Now #}

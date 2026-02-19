@@ -514,6 +514,9 @@ class Order(db.Model):
     budget_tier = db.Column(db.String(20)) # Basic, Standard, Premium
     deadline = db.Column(db.DateTime)  # Agreed deadline
     delivery_note = db.Column(db.Text)  # Seller's delivery note
+    rejection_reason = db.Column(db.Text)  # Reason for rejection (if cancelled)
+    can_review = db.Column(db.Boolean, default=True)  # Can buyer leave review? (False for rejected orders)
+    certificate_name = db.Column(db.String(200))  # Name on certificate (one-time entry, cannot be changed)
     
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
